@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""
+Simon - Unified CLI for mouse/keyboard automation
+"""
+import os
+import sys
+import json
+from datetime import datetime
+
+def show_help():
+    """Show help information"""
+    print("🎬 Simon - Mouse & Keyboard Automation")
+    print("")
+    print("COMMANDS:")
+    print("  simon record                 Record a new automation")
+    print("  simon play [recording]       Play a recording (defaults to most recent)")
+    print("  simon --help                 Show this help")
+    print("")
+    print("EXAMPLES:")
+    print("  simon record                 # Start recording, press F1 to start/stop")
+    print("  simon play                   # Play most recent recording")
+    print("  simon play rec3              # Play specific recording 'rec3'")
+    print("")
+
+
+def run_record():
+    """Run the recording tool"""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    record_script = os.path.join(project_root, 'src', 'core', 'script_recorder.py')
+    os.execv(sys.executable, [sys.executable, record_script] + sys.argv[2:])
+
+def get_latest_recording():
+    """Get the most recent recording ID based on creation time"""
+    if not os.path.exists("recordings"):
+        return None
+    
+    recordings = [d for d in os.listdir("recordings") if os.path.isdir(f"recordings/{d}")]
+    if not recordings:
+        return None
+    
+    latest_recording = None
+    latest_time = 0
+    
+    for recording_id in recordings:
+        info_file = f"recordings/{recording_id}/info.json"
+        if os.path.exists(info_file):
+            try:
+                with open(info_file, 'r') as f:
+                    info = json.load(f)
+                created = info.get('created', '')
+                if created:
+                    # Convert ISO timestamp to unix time for comparison
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                    timestamp = dt.timestamp()
+                    if timestamp > latest_time:
+                        latest_time = timestamp
+                        latest_recording = recording_id
+            except:
+                continue
+        else:
+            # Fallback to folder modification time if no info.json
+            folder_path = f"recordings/{recording_id}"
+            try:
+                folder_time = os.path.getmtime(folder_path)
+                if folder_time > latest_time:
+                    latest_time = folder_time
+                    latest_recording = recording_id
+            except:
+                continue
+    
+    return latest_recording
+
+def run_play(recording_id):
+    """Run the playback tool"""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    play_script = os.path.join(project_root, 'src', 'core', 'simon_says.py')
+    os.execv(sys.executable, [sys.executable, play_script, recording_id] + sys.argv[3:])
+
+
+def main():
+    if len(sys.argv) < 2:
+        show_help()
+        return
+    
+    command = sys.argv[1].lower()
+    
+    if command in ['--help', '-h', 'help']:
+        show_help()
+    
+    elif command == 'record':
+        run_record()
+    
+    elif command == 'play':
+        if len(sys.argv) < 3:
+            # No recording specified - use the most recent one
+            latest = get_latest_recording()
+            if latest:
+                print(f"🎬 Playing most recent recording: {latest}")
+                run_play(latest)
+            else:
+                print("❌ No recordings found")
+                print("💡 Use 'simon record' to create a recording first")
+        else:
+            run_play(sys.argv[2])
+    
+    else:
+        print(f"❌ Unknown command: {command}")
+        print("💡 Use 'simon --help' to see available commands")
+
+if __name__ == '__main__':
+    main()

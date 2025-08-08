@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""Quick script to run simon_says.py"""
+import os
+import sys
+
+# Get the parent directory (project root)
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+play_script = os.path.join(project_root, 'src', 'core', 'simon_says.py')
+
+# Run simon_says.py with any provided arguments
+os.execv(sys.executable, [sys.executable, play_script] + sys.argv[1:])
