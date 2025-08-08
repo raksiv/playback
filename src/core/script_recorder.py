@@ -11,6 +11,7 @@ from Quartz import (
     CGEventMaskBit, CGEventTapCreate, CGEventGetLocation, CGEventGetIntegerValueField,
     kCGEventLeftMouseDown, kCGEventLeftMouseUp, kCGEventRightMouseDown, kCGEventRightMouseUp,
     kCGEventMouseMoved, kCGEventKeyDown, kCGEventKeyUp, kCGKeyboardEventKeycode,
+    kCGEventOtherMouseDown, kCGEventOtherMouseUp, kCGMouseEventButtonNumber,
     kCGSessionEventTap, kCGHeadInsertEventTap,
     CFRunLoopGetCurrent, CFRunLoopRun, CFRunLoopStop,
     CFMachPortCreateRunLoopSource, CFRunLoopAddSource, kCFRunLoopDefaultMode,
@@ -45,13 +46,12 @@ CHAR_KEYCODES = {
 }
 
 class ScriptRecorder:
-    def __init__(self, locations_file='locations.json'):
+    def __init__(self, locations_file=None):
         self.base_locations_file = locations_file
         self.locations = self.load_locations()
         self.events = []
         self.start_time = None
         self.is_recording = False
-        self.f1_keycode = 122  # F1 key code
         self.current_text_buffer = ""
         self.last_event_time = 0
         self.click_counter = 1  # For generating location names
@@ -64,7 +64,7 @@ class ScriptRecorder:
         
     def load_locations(self):
         """Load existing locations to match clicks to named locations"""
-        if os.path.exists(self.base_locations_file):
+        if self.base_locations_file and os.path.exists(self.base_locations_file):
             try:
                 with open(self.base_locations_file, 'r') as f:
                     return json.load(f)
@@ -137,15 +137,11 @@ class ScriptRecorder:
     def flush_text_buffer(self):
         """Convert accumulated text to script commands"""
         if not self.current_text_buffer:
-            print("\n[FLUSH: Empty buffer]")
             return
         
         text = self.current_text_buffer.strip()
-        print(f"\n[FLUSH: Raw buffer: '{self.current_text_buffer}' | Stripped: '{text}']")
-        
         if not text:
             self.current_text_buffer = ""
-            print("[FLUSH: No text after strip]")
             return
         
         # Check if it's a single line or multiple lines
@@ -155,7 +151,7 @@ class ScriptRecorder:
             # Single line - use type command
             command = f'type "{text}"'
             self.events.append(command)
-            print(f"[FLUSH: Added command: {command}]")
+            print(f"\n[Captured text: \"{text}\"]")
         else:
             # Multiple lines - use code block format
             self.events.append('type code block')
@@ -163,7 +159,7 @@ class ScriptRecorder:
             for line in lines:
                 self.events.append(line)
             self.events.append('```')
-            print(f"[FLUSH: Added code block with {len(lines)} lines]")
+            print(f"\n[Captured code block: {len(lines)} lines]")
         
         self.current_text_buffer = ""
     
@@ -196,14 +192,51 @@ class ScriptRecorder:
         
         return None, False
     
+    def handle_key_combination(self, keycode, flags, current_time):
+        """Handle key combinations like cmd+s, ctrl+c, etc."""
+        # Check for modifier keys
+        cmd_pressed = bool(flags & 0x100000)  # Command key
+        ctrl_pressed = bool(flags & 0x40000)   # Control key  
+        shift_pressed = bool(flags & 0x20000)  # Shift key
+        option_pressed = bool(flags & 0x80000) # Option key
+        
+        # Only handle combinations, not lone modifier keys
+        if not (cmd_pressed or ctrl_pressed) or keycode in [55, 59, 56, 58]:  # Skip lone modifiers
+            return False
+            
+        # Get the base key name
+        key_name = CHAR_KEYCODES.get(keycode) or KEYCODE_NAMES.get(keycode)
+        if not key_name:
+            return False
+        
+        # Flush text buffer before key combination
+        self.flush_text_buffer()
+        
+        # Build the combination command
+        modifiers = []
+        if cmd_pressed:
+            modifiers.append("cmd")
+        if ctrl_pressed:
+            modifiers.append("ctrl")
+        if shift_pressed:
+            modifiers.append("shift")
+        if option_pressed:
+            modifiers.append("option")
+            
+        command = f"press {'+'.join(modifiers)}+{key_name}"
+        self.events.append(command)
+        print(f"[{current_time - self.start_time:.1f}s] {command}")
+        
+        return True  # Handled
+    
     def event_callback(self, proxy, event_type, event, refcon):
         """Handle recorded events"""
         current_time = time.time()
         
-        # Check for F1 key press to toggle recording
-        if event_type == kCGEventKeyDown:
-            keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
-            if keycode == self.f1_keycode:
+        # Check for middle mouse click to toggle recording
+        if event_type == kCGEventOtherMouseDown:
+            button = CGEventGetIntegerValueField(event, kCGMouseEventButtonNumber)
+            if button == 2:  # Middle mouse button (button 2)
                 if not self.is_recording:
                     self.is_recording = True
                     self.start_time = current_time
@@ -222,11 +255,11 @@ class ScriptRecorder:
                     
                     self.recording_locations_file = f"{self.recording_folder}/locations.json"
                     
-                    print("\n🔴 RECORDING STARTED - Press F1 again to stop")
+                    print("\n🔴 RECORDING STARTED - Middle click again to stop")
                     print(f"📍 Locations will be saved to: {self.recording_locations_file}")
                     print("Perform your actions...")
                     print("-" * 40)
-                    return None  # Consume the F1 event
+                    return None  # Consume the middle click event
                 else:
                     self.is_recording = False
                     print("-" * 40)
@@ -235,26 +268,32 @@ class ScriptRecorder:
                     self.save_script()
                     # Stop the run loop to exit
                     CFRunLoopStop(CFRunLoopGetCurrent())
-                    return None  # Consume the F1 event
+                    return None  # Consume the middle click event
         
         # Only record events if recording is active
         if not self.is_recording:
             return event
         
-        # Add wait commands for delays (capture shorter delays)
+        # Add wait commands for delays and flush text on pauses
         time_since_last = current_time - self.last_event_time
-        if time_since_last > 0.3 and self.events:  # More than 0.3 seconds (lower threshold)
-            self.flush_text_buffer()
-            # Round to nearest 0.25 second for more precise timing
-            if time_since_last >= 2.0:
-                wait_time = int(time_since_last)
-            elif time_since_last >= 1.0:
-                wait_time = round(time_since_last * 2) / 2  # Round to 0.5, 1.0, 1.5
-            else:
-                wait_time = round(time_since_last * 4) / 4  # Round to 0.25, 0.5, 0.75
+        if time_since_last > 0.5:  # More than 0.5 seconds indicates a pause
+            # Flush any accumulated text before the wait
+            if self.current_text_buffer.strip():
+                self.flush_text_buffer()
+                print(f"\n[Text flushed after pause]")
             
-            self.events.append(f"wait {wait_time}")
-            print(f"[Added wait {wait_time}s]")
+            # Add wait command if we have other events
+            if self.events:
+                # Round to nearest 0.25 second for more precise timing
+                if time_since_last >= 2.0:
+                    wait_time = 0.6  # 0.5 * 1.25
+                elif time_since_last >= 1.0:
+                    wait_time = 0.4  # 0.3 * 1.25 (rounded)
+                else:
+                    wait_time = 0.25  # 0.2 * 1.25
+                
+                self.events.append(f"wait {wait_time}")
+                print(f"[Added wait {wait_time}s]")
         
         self.last_event_time = current_time
         
@@ -322,8 +361,8 @@ class ScriptRecorder:
                     print(f"[{current_time - self.start_time:.1f}s] {command}")
                     
                     # Add automatic safety delay after mouse action
-                    self.events.append("wait 0.75") 
-                    print(f"[Added UI safety delay: 0.75s]")
+                    self.events.append("wait 0.25") 
+                    print(f"[Added UI safety delay: 0.25s]")
                     
                     # Remember this location for next move
                     self.last_click_location = up_location_name
@@ -338,31 +377,45 @@ class ScriptRecorder:
             keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
             flags = CGEventGetFlags(event)
             
-            # Skip F1 key
-            if keycode == self.f1_keycode:
-                return event
+            # No need to skip any keys now since we're using middle click
             
             # Only process key down events
             if event_type == kCGEventKeyDown:
+                # Check for modifier key combinations first
+                if self.handle_key_combination(keycode, flags, current_time):
+                    return event
+                
                 char, is_special = self.keycode_to_char(keycode, flags)
                 
                 if char:
                     if is_special:
-                        # Special key - flush text buffer and add press command
-                        self.flush_text_buffer()
-                        command = f"press {char}"
-                        self.events.append(command)
-                        print(f"[{current_time - self.start_time:.1f}s] {command}")
-                        
-                        # Add newline to text buffer if it was return
-                        if char == 'return':
-                            self.current_text_buffer += '\n'
+                        # Handle special keys that affect text
+                        if char in ['backspace', 'delete']:
+                            # Handle delete keys - remove from buffer if possible
+                            if self.current_text_buffer and char == 'backspace':
+                                self.current_text_buffer = self.current_text_buffer[:-1]
+                                print("⌫", end="", flush=True)
+                            else:
+                                # Flush buffer and record the delete key
+                                self.flush_text_buffer()
+                                command = f"press {char}"
+                                self.events.append(command)
+                                print(f"[{current_time - self.start_time:.1f}s] {command}")
+                        else:
+                            # Other special keys - flush text buffer and add press command
+                            self.flush_text_buffer()
+                            command = f"press {char}"
+                            self.events.append(command)
+                            print(f"[{current_time - self.start_time:.1f}s] {command}")
+                            
+                            # Add automatic delay after return keys for code editors
+                            if char == 'return':
+                                self.events.append("wait 0.25")
+                                print(f"[Added return delay: 0.25s]")
                     else:
-                        # Regular character - add to text buffer
+                        # Regular character - add to text buffer silently
                         self.current_text_buffer += char
-                        print(f"[CHAR: '{char}' | BUFFER: '{self.current_text_buffer}']", end="", flush=True)
-                        if char == ' ':
-                            print(" ", end="", flush=True)
+                        print(".", end="", flush=True)  # Simple progress indicator
         
         return event
     
@@ -428,9 +481,9 @@ class ScriptRecorder:
         print("This tool records your actions and converts them to Simon Says script format")
         print("")
         print("Instructions:")
-        print("1. Press F1 to start recording")
+        print("1. Middle click to start recording")
         print("2. Perform your actions (clicks, typing, etc.)")
-        print("3. Press F1 again to stop and save the script")
+        print("3. Middle click again to stop and save the script")
         print("4. Press Ctrl+C to exit")
         print("")
         if self.locations:
@@ -443,6 +496,8 @@ class ScriptRecorder:
             CGEventMaskBit(kCGEventLeftMouseUp) |
             CGEventMaskBit(kCGEventRightMouseDown) |
             CGEventMaskBit(kCGEventRightMouseUp) |
+            CGEventMaskBit(kCGEventOtherMouseDown) |
+            CGEventMaskBit(kCGEventOtherMouseUp) |
             CGEventMaskBit(kCGEventKeyDown) |
             CGEventMaskBit(kCGEventKeyUp)
         )
@@ -477,8 +532,8 @@ class ScriptRecorder:
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Record actions and convert to Simon Says script format')
-    parser.add_argument('--locations', default='locations.json',
-                       help='Locations file for smart click detection (default: locations.json)')
+    parser.add_argument('--locations',
+                       help='Base locations file for smart click detection (optional)')
     
     args = parser.parse_args()
     

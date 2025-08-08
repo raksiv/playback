@@ -7,81 +7,106 @@ A collection of tools for mouse and keyboard automation on macOS, including loca
 ```
 /
 ├── bin/                    # Executable wrapper scripts
-│   ├── learn              # Quick access to location learning
-│   └── play               # Quick access to script execution
+│   ├── play               # Quick access to script execution
+│   ├── record             # Record automation sessions
+│   └── playback           # Playback recorded sessions
 ├── src/
 │   ├── core/              # Main functionality
-│   │   ├── learn.py       # Learn and save screen locations
-│   │   └── simon_says.py  # Execute human-readable automation scripts
+│   │   ├── simon_says.py  # Execute human-readable automation scripts
+│   │   └── script_recorder.py # Record automation sessions
 │   └── tools/             # Utilities and helpers
 │       ├── position.py    # Position utilities
 │       └── main.py        # Additional tools
+├── recordings/            # Recorded automation sessions
+│   └── rec1/              # Example recording
+│       ├── script.txt     # Automation commands
+│       ├── locations.json # Session-specific locations
+│       └── info.json      # Recording metadata
 ├── examples/              # Example scripts and outputs
 │   └── script.txt         # Sample automation script
-├── docs/                  # Documentation
-└── locations.json         # Saved screen locations
+└── docs/                  # Documentation
 ```
 
 ## Quick Start
 
-1. **Learn screen locations:**
+0. **uenv**
+
+source /Users/rs/mouse/.venv/bin/activate
+
+1. **Record automation sessions:**
+
    ```bash
-   ./bin/learn
+   ./bin/record
    ```
-   Interactive tool to click and name UI elements.
+
+   Interactive recording tool - middle click to start/stop recording your actions.
 
 2. **Create automation scripts:**
    Create a text file with human-readable commands:
+
    ```
    move mouse to button1
    left click
    type "Hello World"
    press return
-   
+
    type code block
    ```
+
    import sys
    class Example:
-       def __init__(self):
-           pass
+   def **init**(self):
+   pass
+
    ```
+
    ```
 
 3. **Run automation scripts:**
+
    ```bash
-   ./bin/play examples/script.txt
+   # Play a regular script file (requires --locations argument)
+   ./bin/play examples/script.txt --locations path/to/locations.json
+
+   # Or play a recorded session (automatically uses session locations)
+   ./bin/play rec1
    ```
-   Press F1 to start execution.
+
+   Press middle mouse button to start execution.
 
 ## Features
 
-### Location Learning (`src/core/learn.py`)
-- Interactive GUI for learning screen coordinates
-- Save/load named locations to JSON
-- Commands: `learn <name>`, `list`, `delete <name>`
+### Session Recording (`src/core/script_recorder.py`)
+
+- Interactive recording of mouse and keyboard actions
+- Automatic location detection and naming
+- Creates complete automation sessions with metadata
 
 ### Script Automation (`src/core/simon_says.py`)
+
 - Human-readable command syntax
 - Clipboard-based text pasting (reliable for code editors)
-- F1 trigger for precise timing
+- Middle mouse button trigger for precise timing
 - Automatic trailing whitespace cleanup
 
 ### Commands Supported
+
 - `left click [at <location>]`
-- `right click [at <location>]` 
+- `right click [at <location>]`
 - `move mouse to <location>`
 - `type "text"`
 - `type line "text"` (adds return)
 - `press <key>` (return, escape, tab, etc.)
 - `wait <seconds>`
-- `type code block` with ```...``` syntax
+- `type code block` with `...` syntax
 
 ## Technical Details
 
 - Uses macOS Quartz framework for precise input simulation
 - Clipboard-based pasting avoids character encoding issues
 - Home key navigation prevents auto-indent conflicts
-- F1 trigger provides user control over execution timing
+- Middle mouse button trigger provides user control over execution timing
+- Recording system automatically saves locations per session
 
 ## Requirements
 
@@ -93,5 +118,5 @@ A collection of tools for mouse and keyboard automation on macOS, including loca
 
 1. Clone or download this project
 2. Grant accessibility permissions to Terminal/Python
-3. Run `./bin/learn` to start learning locations
-4. Create automation scripts and run with `./bin/play`
+3. Record automation sessions with `./bin/record`
+4. Play back recordings with `./bin/play <recording_id>` or run scripts with `./bin/play <script_file> --locations <locations_file>`

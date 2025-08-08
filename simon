@@ -14,13 +14,17 @@ def show_help():
     print("COMMANDS:")
     print("  simon record                 Record a new automation")
     print("  simon play [recording]       Play a recording (defaults to most recent)")
+    print("  simon release                Release stuck modifier keys")
     print("  simon --help                 Show this help")
     print("")
     print("EXAMPLES:")
-    print("  simon record                 # Start recording, press F1 to start/stop")
+    print("  simon record                 # Start recording, middle click to start/stop")
     print("  simon play                   # Play most recent recording")
     print("  simon play rec3              # Play specific recording 'rec3'")
+    print("  simon release                # Fix stuck keys manually")
     print("")
+
+
 
 
 def run_record():

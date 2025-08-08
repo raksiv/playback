@@ -1,11 +1,10 @@
-#!/usr/bin/env python3
-"""Quick script to run script_recorder.py"""
-import os
-import sys
+#!/bin/bash
+# Quick script to run script_recorder.py with virtual environment
 
-# Get the parent directory (project root)
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-record_script = os.path.join(project_root, 'src', 'core', 'script_recorder.py')
+# Get the directory containing this script
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
-# Run script_recorder.py with any provided arguments
-os.execv(sys.executable, [sys.executable, record_script] + sys.argv[1:])
+# Activate virtual environment and run script
+source "$PROJECT_ROOT/.venv/bin/activate"
+exec python "$PROJECT_ROOT/src/core/script_recorder.py" "$@"

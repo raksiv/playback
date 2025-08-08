@@ -15,7 +15,8 @@ from Quartz import (
     kCGEventRightMouseDown, kCGEventRightMouseUp,
     kCGEventMouseMoved,
     kCGMouseButtonLeft, kCGMouseButtonRight,
-    CGEventCreate, CGEventGetLocation
+    CGEventCreate, CGEventGetLocation,
+    CGEventKeyboardSetUnicodeString
 )
 
 # Key codes for common keys
@@ -47,7 +48,7 @@ SHIFT_CHARS = {
 }
 
 class SimonSaysPaste:
-    def __init__(self, locations_file='locations.json', delay=0.1):
+    def __init__(self, locations_file, delay=0.06):
         self.locations = {}
         self.delay = delay
         self.load_locations(locations_file)
@@ -63,7 +64,7 @@ class SimonSaysPaste:
                 print(f"Warning: Could not load locations from {locations_file}")
                 self.locations = {}
         else:
-            print(f"No locations file found at {locations_file}")
+            print(f"Warning: No locations file found at {locations_file}")
     
     def get_current_mouse_position(self):
         """Get current mouse position"""
@@ -71,7 +72,7 @@ class SimonSaysPaste:
         loc = CGEventGetLocation(event)
         return int(loc.x), int(loc.y)
     
-    def move_mouse(self, x, y, smooth=True, duration=0.3):
+    def move_mouse(self, x, y, smooth=True, duration=0.2):
         """Move mouse to specific coordinates with smooth animation"""
         if not smooth:
             # Instant movement (old behavior)
@@ -109,7 +110,7 @@ class SimonSaysPaste:
         """Click mouse button at current or specified position"""
         if x is not None and y is not None:
             self.move_mouse(x, y)
-            time.sleep(0.2)  # Give UI time to respond to mouse movement
+            time.sleep(0.05)  # Give UI time to respond to mouse movement
         
         current_x, current_y = self.get_current_mouse_position()
         point = CGPointMake(current_x, current_y)
@@ -127,13 +128,13 @@ class SimonSaysPaste:
         CGEventPost(kCGHIDEventTap, down_event)
         time.sleep(0.1)  # Longer click duration
         CGEventPost(kCGHIDEventTap, up_event)
-        time.sleep(0.3)  # Wait after click for UI to respond
+        time.sleep(0.1)
     
-    def click_and_hold(self, button='left', duration=1.0, x=None, y=None):
+    def click_and_hold(self, button='left', duration=0.4, x=None, y=None):
         """Click and hold mouse button for specified duration"""
         if x is not None and y is not None:
             self.move_mouse(x, y)
-            time.sleep(0.2)
+            time.sleep(0.05)
         
         current_x, current_y = self.get_current_mouse_position()
         point = CGPointMake(current_x, current_y)
@@ -152,14 +153,14 @@ class SimonSaysPaste:
         CGEventPost(kCGHIDEventTap, down_event)
         time.sleep(duration)  # Hold for specified duration
         CGEventPost(kCGHIDEventTap, up_event)
-        time.sleep(0.3)
+        time.sleep(0.05)
     
     def drag_mouse(self, button='left', from_x=None, from_y=None, to_x=None, to_y=None):
         """Drag mouse from one location to another"""
         # Move to start position
         if from_x is not None and from_y is not None:
             self.move_mouse(from_x, from_y)
-            time.sleep(0.2)
+            time.sleep(0.05)
         
         start_x, start_y = self.get_current_mouse_position()
         start_point = CGPointMake(start_x, start_y)
@@ -178,7 +179,7 @@ class SimonSaysPaste:
         
         # Drag to end position
         if to_x is not None and to_y is not None:
-            self.move_mouse(to_x, to_y, smooth=True, duration=0.5)  # Slower drag movement
+            self.move_mouse(to_x, to_y, smooth=True, duration=0.25)  # Slower drag movement
         
         # Mouse up at end position
         end_x, end_y = self.get_current_mouse_position()
@@ -190,12 +191,33 @@ class SimonSaysPaste:
             up_event = CGEventCreateMouseEvent(None, kCGEventRightMouseUp, end_point, kCGMouseButtonRight)
         
         CGEventPost(kCGHIDEventTap, up_event)
-        time.sleep(0.3)
+        time.sleep(0.05)
     
-    def copy_to_clipboard(self, text):
-        """Copy text to clipboard using pbcopy"""
-        process = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
-        process.communicate(text.encode('utf-8'))
+    def release_all_modifiers(self):
+        """Force release ALL modifier keys to prevent stuck states"""
+        modifiers = [
+            (55, 'cmd'),
+            (56, 'shift'), 
+            (57, 'caps lock'),
+            (58, 'option/alt'),
+            (59, 'control'),
+            (60, 'right shift'),
+            (61, 'right option'),
+            (62, 'right control'),
+            (63, 'fn')  # Function key - THIS is the problematic one!
+        ]
+        
+        for keycode, name in modifiers:
+            try:
+                # Send key up event for each modifier
+                up_event = CGEventCreateKeyboardEvent(None, keycode, False)
+                CGEventPost(kCGHIDEventTap, up_event)
+            except:
+                pass  # Ignore errors for non-existent keycodes
+        
+        # Small delay to ensure all releases are processed
+        time.sleep(0.01)
+    
     
     def press_key_combo(self, key, cmd=False, ctrl=False, shift=False, option=False):
         """Press a key combination"""
@@ -209,63 +231,43 @@ class SimonSaysPaste:
         if cmd:
             cmd_down = CGEventCreateKeyboardEvent(None, 55, True)
             CGEventPost(kCGHIDEventTap, cmd_down)
-            time.sleep(0.01)
         if ctrl:
             ctrl_down = CGEventCreateKeyboardEvent(None, 59, True)
             CGEventPost(kCGHIDEventTap, ctrl_down)
-            time.sleep(0.01)
         if shift:
             shift_down = CGEventCreateKeyboardEvent(None, 56, True)
             CGEventPost(kCGHIDEventTap, shift_down)
-            time.sleep(0.01)
         if option:
             option_down = CGEventCreateKeyboardEvent(None, 58, True)
             CGEventPost(kCGHIDEventTap, option_down)
-            time.sleep(0.01)
+        
+        time.sleep(0.005)
         
         # Press main key
         key_down = CGEventCreateKeyboardEvent(None, keycode, True)
         CGEventPost(kCGHIDEventTap, key_down)
-        time.sleep(0.02)
+        time.sleep(0.005)
         
         key_up = CGEventCreateKeyboardEvent(None, keycode, False)
         CGEventPost(kCGHIDEventTap, key_up)
-        time.sleep(0.02)
+        time.sleep(0.005)
         
         # Release modifiers in reverse order
         if option:
             option_up = CGEventCreateKeyboardEvent(None, 58, False)
             CGEventPost(kCGHIDEventTap, option_up)
-            time.sleep(0.01)
         if shift:
             shift_up = CGEventCreateKeyboardEvent(None, 56, False)
             CGEventPost(kCGHIDEventTap, shift_up)
-            time.sleep(0.01)
         if ctrl:
             ctrl_up = CGEventCreateKeyboardEvent(None, 59, False)
             CGEventPost(kCGHIDEventTap, ctrl_up)
-            time.sleep(0.01)
         if cmd:
             cmd_up = CGEventCreateKeyboardEvent(None, 55, False)
             CGEventPost(kCGHIDEventTap, cmd_up)
-            time.sleep(0.01)
+        
+        time.sleep(0.005)
     
-    def paste_line(self, text):
-        """Paste a line of text using clipboard"""
-        # Strip trailing spaces from the line
-        cleaned_text = text.rstrip(' \t')
-        
-        # Copy cleaned text to clipboard
-        self.copy_to_clipboard(cleaned_text)
-        time.sleep(0.05)
-        
-        # Go to beginning of line with Home key (much cleaner)
-        self.type_key('home')
-        time.sleep(0.05)
-        
-        # Paste with Cmd+V
-        self.press_key_combo('v', cmd=True)
-        time.sleep(0.05)
     
     def type_key(self, key):
         """Type a single key"""
@@ -273,44 +275,78 @@ class SimonSaysPaste:
             print(f"Unknown key: {key}")
             return
         
-        keycode = KEYCODES[key]
-        down_event = CGEventCreateKeyboardEvent(None, keycode, True)
-        CGEventPost(kCGHIDEventTap, down_event)
-        time.sleep(0.02)
+        # CRITICAL: Release ALL modifiers before typing 'e', '.', or 'd' to prevent emoji picker
+        # Fn+E, Fn+., and Fn+D can trigger the emoji picker on macOS
+        if key in ['e', '.', 'd']:
+            self.release_all_modifiers()
         
-        up_event = CGEventCreateKeyboardEvent(None, keycode, False)
-        CGEventPost(kCGHIDEventTap, up_event)
-        time.sleep(0.02)
+        keycode = KEYCODES[key]
+        
+        # Special handling for return key with longer timing
+        if key == 'return':
+            down_event = CGEventCreateKeyboardEvent(None, keycode, True)
+            CGEventPost(kCGHIDEventTap, down_event)
+            time.sleep(0.1)  # Longer press duration
+            
+            up_event = CGEventCreateKeyboardEvent(None, keycode, False)
+            CGEventPost(kCGHIDEventTap, up_event)
+            time.sleep(0.05)
+            
+        else:
+            # Standard key handling
+            down_event = CGEventCreateKeyboardEvent(None, keycode, True)
+            CGEventPost(kCGHIDEventTap, down_event)
+            time.sleep(0.01)
+            
+            up_event = CGEventCreateKeyboardEvent(None, keycode, False)
+            CGEventPost(kCGHIDEventTap, up_event)
+            time.sleep(0.01)
+    
+    def release_all_modifiers(self):
+        """Release all modifier keys to prevent race conditions"""
+        modifiers = [
+            (55, 'cmd'), 
+            (59, 'ctrl'), 
+            (56, 'shift'), 
+            (58, 'option'),
+            (63, 'fn')  # Function key - this could be the culprit!
+        ]
+        for keycode, name in modifiers:
+            try:
+                up_event = CGEventCreateKeyboardEvent(None, keycode, False)
+                CGEventPost(kCGHIDEventTap, up_event)
+            except:
+                pass
+        time.sleep(0.005)
     
     def type_text(self, text):
         """Type text character by character (fallback for simple text)"""
-        print(f"  Typing text: '{text}'")
         for i, char in enumerate(text):
-            print(f"  [{i}] Char: '{char}'", end=" ")
+            # Extra safety: release modifiers before ANY 'e', '.', or 'd' character
+            if char.lower() in ['e', 'd'] or char == '.':
+                self.release_all_modifiers()
+            
             if char == ' ':
-                print("-> space key")
                 self.type_key('space')
             elif char == '\n':
-                print("-> return key") 
                 self.type_key('return')
             elif char == '\t':
-                print("-> tab key")
                 self.type_key('tab')
             elif char in SHIFT_CHARS and char not in [' ', '\n', '\t']:
                 base_key = SHIFT_CHARS[char]
                 if base_key in KEYCODES:
-                    print(f"-> shift+{base_key}")
                     self.press_key_combo(base_key, shift=True)
             elif char.isupper():
-                print(f"-> shift+{char.lower()}")
+                # For uppercase E and D, be extra careful
+                if char in ['E', 'D']:
+                    self.release_all_modifiers()
+                    time.sleep(0.05)
                 self.press_key_combo(char.lower(), shift=True)
             elif char.lower() in KEYCODES:
-                print(f"-> {char.lower()}")
                 self.type_key(char.lower())
             else:
-                print(f"-> CANNOT TYPE!")
                 print(f"Cannot type character: {char}")
-            time.sleep(0.02)  # Increased delay slightly
+            time.sleep(0.005)
     
     def execute_command(self, command):
         """Execute a single command"""
@@ -333,7 +369,7 @@ class SimonSaysPaste:
                     try:
                         duration = float(duration_str)
                     except:
-                        duration = 1.0
+                        duration = 0.4
                 else:
                     location = location_and_duration
                     duration = 1.0
@@ -358,7 +394,7 @@ class SimonSaysPaste:
                     try:
                         duration = float(duration_str)
                     except:
-                        duration = 1.0
+                        duration = 0.4
                 else:
                     location = location_and_duration
                     duration = 1.0
@@ -425,12 +461,59 @@ class SimonSaysPaste:
                     print(f"Unknown location: {location}")
                     
         elif command.lower().startswith('press'):
-            key = command[5:].strip().lower()
-            if key in KEYCODES:
-                print(f"  Pressing key: '{key}'")
-                self.type_key(key)
+            key_combo = command[5:].strip()
+            
+            # Check if it's a key combination (contains +)
+            if '+' in key_combo:
+                parts = key_combo.split('+')
+                modifiers = parts[:-1]  # All but last are modifiers
+                key = parts[-1].strip().lower()
+                
+                # Convert modifier names
+                cmd = 'cmd' in modifiers or 'command' in modifiers
+                ctrl = 'ctrl' in modifiers or 'control' in modifiers  
+                shift = 'shift' in modifiers
+                option = 'option' in modifiers or 'alt' in modifiers
+                
+                if key in KEYCODES:
+                    print(f"  Pressing key combo: {key_combo}")
+                    self.press_key_combo(key, cmd=cmd, ctrl=ctrl, shift=shift, option=option)
+                else:
+                    print(f"Unknown key in combo: {key}")
             else:
-                print(f"Unknown key: {key}")
+                # Simple key press
+                key = key_combo.lower()
+                if key in KEYCODES:
+                    print(f"  Pressing key: '{key}'")
+                    self.type_key(key)
+                else:
+                    print(f"Unknown key: {key}")
+                    
+        elif command.lower().startswith('newline') or command.lower() == 'new line':
+            # Alternative newline method for problematic editors
+            print("  Creating newline (clipboard method)")
+            self.copy_to_clipboard('\n')
+            time.sleep(0.05)
+            self.press_key_combo('v', cmd=True)
+            time.sleep(0.05)
+            
+        elif command.lower().startswith('paste newline') or command.lower().startswith('paste line'):
+            # Paste text with newline at the end using clipboard
+            if 'paste line' in command.lower():
+                text = command.split('paste line', 1)[1].strip()
+            else:
+                text = command.split('paste newline', 1)[1].strip()
+            
+            if text.startswith('"') and text.endswith('"'):
+                text = text[1:-1]
+            elif text.startswith("'") and text.endswith("'"):
+                text = text[1:-1]
+            
+            print(f"  Pasting line with newline: '{text}'")
+            self.copy_to_clipboard(text + '\n')
+            time.sleep(0.05)
+            self.press_key_combo('v', cmd=True)
+            time.sleep(0.05)
                 
         elif command.lower().startswith('type line'):
             text = command[9:].strip()
@@ -534,38 +617,38 @@ class SimonSaysPaste:
         except Exception as e:
             print(f"Error executing script: {e}")
 
-def wait_for_f1():
-    """Wait for F1 key press to start execution"""
+def wait_for_middle_click():
+    """Wait for middle mouse click to start execution"""
     from Quartz import (
         CGEventMaskBit, CGEventTapCreate, CGEventGetIntegerValueField,
-        kCGEventKeyDown, kCGKeyboardEventKeycode,
+        kCGEventOtherMouseDown, kCGMouseEventButtonNumber,
         kCGSessionEventTap, kCGHeadInsertEventTap,
         CFRunLoopGetCurrent, CFRunLoopRun, CFRunLoopStop,
         CFMachPortCreateRunLoopSource, CFRunLoopAddSource, kCFRunLoopDefaultMode
     )
     
-    f1_pressed = [False]  # Use list for closure
+    middle_clicked = [False]  # Use list for closure
     
-    def f1_callback(proxy, event_type, event, refcon):
-        if event_type == kCGEventKeyDown:
-            keycode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode)
-            if keycode == 122:  # F1 keycode
-                f1_pressed[0] = True
+    def middle_click_callback(proxy, event_type, event, refcon):
+        if event_type == kCGEventOtherMouseDown:
+            button = CGEventGetIntegerValueField(event, kCGMouseEventButtonNumber)
+            if button == 2:  # Middle mouse button
+                middle_clicked[0] = True
                 CFRunLoopStop(CFRunLoopGetCurrent())
-                return None  # Consume the F1 event
+                return None  # Consume the middle click event
         return event
     
-    print("Press F1 to start execution...")
+    print("Middle click to start execution...")
     print("Press Ctrl+C to cancel")
     
-    # Create event tap for F1 key
-    mask = CGEventMaskBit(kCGEventKeyDown)
+    # Create event tap for middle mouse click
+    mask = CGEventMaskBit(kCGEventOtherMouseDown)
     tap = CGEventTapCreate(
         kCGSessionEventTap,
         kCGHeadInsertEventTap,
         0,
         mask,
-        f1_callback,
+        middle_click_callback,
         None
     )
     
@@ -577,7 +660,7 @@ def wait_for_f1():
         source = CFMachPortCreateRunLoopSource(None, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopDefaultMode)
         CFRunLoopRun()
-        return f1_pressed[0]
+        return middle_clicked[0]
     except KeyboardInterrupt:
         print("\nCancelled by user")
         CFRunLoopStop(CFRunLoopGetCurrent())
@@ -587,16 +670,14 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description='Execute commands using clipboard paste approach')
     parser.add_argument('script', nargs='?', help='Script file to execute')
-    parser.add_argument('--locations', default='locations.json', 
-                       help='Locations file (default: locations.json)')
-    parser.add_argument('--delay', type=float, default=0.1, 
+    parser.add_argument('--locations', 
+                       help='Locations file (required for recorded scripts)')
+    parser.add_argument('--delay', type=float, default=0.06, 
                        help='Delay between commands in seconds (default: 0.1)')
     parser.add_argument('--countdown', action='store_true',
-                       help='Use countdown instead of F1 trigger')
+                       help='Use countdown instead of middle click trigger')
     
     args = parser.parse_args()
-    
-    simon = SimonSaysPaste(args.locations, args.delay)
     
     if args.script:
         # Check if it's a recording ID or a file path
@@ -606,7 +687,7 @@ def main():
             script_file = f"recordings/{recording_id}/script.txt"
             locations_file = f"recordings/{recording_id}/locations.json"
             
-            # Load recording-specific locations
+            # Create SimonSaysPaste with recording-specific locations
             simon = SimonSaysPaste(locations_file, args.delay)
             
             # Load info
@@ -624,6 +705,9 @@ def main():
         elif os.path.exists(args.script):
             # It's a regular file path
             script_file = args.script
+            if not args.locations:
+                print("❌ --locations argument required for regular script files")
+                return
             simon = SimonSaysPaste(args.locations, args.delay)
         else:
             print(f"❌ Recording '{args.script}' not found")
@@ -652,14 +736,19 @@ def main():
             print("Press Ctrl+C to cancel")
             time.sleep(3)
         else:
-            # New F1 method
-            if not wait_for_f1():
+            # Middle click method
+            if not wait_for_middle_click():
                 return
-            print("F1 pressed! Starting execution...")
+            # Don't print anything after middle click - start immediately to avoid focus issues
         
         simon.execute_file(script_file)
     else:
         # Interactive mode
+        if not args.locations:
+            print("❌ --locations argument required for interactive mode")
+            return
+            
+        simon = SimonSaysPaste(args.locations, args.delay)
         print("\n=== Simon Says Paste Mode ===")
         print("Enter commands (or 'quit' to exit):")
         print("This version uses clipboard for reliable code pasting")
