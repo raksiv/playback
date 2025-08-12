@@ -14,6 +14,7 @@ def show_help():
     print("COMMANDS:")
     print("  simon record                 Record a new automation")
     print("  simon play [recording]       Play a recording (defaults to most recent)")
+    print("  simon remap [recording]      Remap click locations for a recording")
     print("  simon release                Release stuck modifier keys")
     print("  simon --help                 Show this help")
     print("")
@@ -21,6 +22,7 @@ def show_help():
     print("  simon record                 # Start recording, middle click to start/stop")
     print("  simon play                   # Play most recent recording")
     print("  simon play rec3              # Play specific recording 'rec3'")
+    print("  simon remap rec1             # Adjust click positions for 'rec1'")
     print("  simon release                # Fix stuck keys manually")
     print("")
 
@@ -81,6 +83,12 @@ def run_play(recording_id):
     play_script = os.path.join(project_root, 'src', 'core', 'simon_says.py')
     os.execv(sys.executable, [sys.executable, play_script, recording_id] + sys.argv[3:])
 
+def run_remap(recording_id):
+    """Run the remap tool"""
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    play_script = os.path.join(project_root, 'src', 'core', 'simon_says.py')
+    os.execv(sys.executable, [sys.executable, play_script, '--remap', recording_id] + sys.argv[3:])
+
 
 def main():
     if len(sys.argv) < 2:
@@ -107,6 +115,19 @@ def main():
                 print("💡 Use 'simon record' to create a recording first")
         else:
             run_play(sys.argv[2])
+    
+    elif command == 'remap':
+        if len(sys.argv) < 3:
+            # No recording specified - use the most recent one
+            latest = get_latest_recording()
+            if latest:
+                print(f"🔧 Remapping most recent recording: {latest}")
+                run_remap(latest)
+            else:
+                print("❌ No recordings found")
+                print("💡 Use 'simon record' to create a recording first")
+        else:
+            run_remap(sys.argv[2])
     
     else:
         print(f"❌ Unknown command: {command}")

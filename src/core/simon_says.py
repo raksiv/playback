@@ -8,6 +8,9 @@ import time
 import os
 import re
 import subprocess
+import shutil
+import threading
+from datetime import datetime
 from Quartz import (
     CGEventCreateMouseEvent, CGEventCreateKeyboardEvent,
     CGEventPost, kCGHIDEventTap, CGPointMake,
@@ -16,7 +19,12 @@ from Quartz import (
     kCGEventMouseMoved,
     kCGMouseButtonLeft, kCGMouseButtonRight,
     CGEventCreate, CGEventGetLocation,
-    CGEventKeyboardSetUnicodeString
+    CGEventKeyboardSetUnicodeString,
+    CGEventMaskBit, CGEventTapCreate, CGEventGetIntegerValueField,
+    kCGEventOtherMouseDown, kCGMouseEventButtonNumber,
+    kCGSessionEventTap, kCGHeadInsertEventTap,
+    CFRunLoopGetCurrent, CFRunLoopRun, CFRunLoopStop,
+    CFMachPortCreateRunLoopSource, CFRunLoopAddSource, kCFRunLoopDefaultMode
 )
 
 # Key codes for common keys
@@ -617,6 +625,245 @@ class SimonSaysPaste:
         except Exception as e:
             print(f"Error executing script: {e}")
 
+class Remapper:
+    """Remap recording locations for a different machine"""
+    
+    def __init__(self, source_recording_path, target_recording_path):
+        self.source_recording_path = source_recording_path
+        self.target_recording_path = target_recording_path
+        
+        # Create target directory
+        os.makedirs(target_recording_path, exist_ok=True)
+        
+        # Copy script and info files to new recording
+        shutil.copy2(
+            os.path.join(source_recording_path, 'script.txt'),
+            os.path.join(target_recording_path, 'script.txt')
+        )
+        
+        if os.path.exists(os.path.join(source_recording_path, 'info.json')):
+            # Load and update info.json
+            with open(os.path.join(source_recording_path, 'info.json'), 'r') as f:
+                info = json.load(f)
+            
+            info['remapped_from'] = source_recording_path
+            info['remapped_at'] = datetime.now().isoformat()
+            
+            with open(os.path.join(target_recording_path, 'info.json'), 'w') as f:
+                json.dump(info, f, indent=2)
+        
+        # Load original locations
+        with open(os.path.join(source_recording_path, 'locations.json'), 'r') as f:
+            self.original_locations = json.load(f)
+        
+        # Initialize new locations
+        self.new_locations = {}
+        
+        # Load script
+        with open(os.path.join(source_recording_path, 'script.txt'), 'r') as f:
+            self.script_lines = f.readlines()
+        
+        self.current_line = 0
+        self.waiting_for_click = False
+        self.current_location_name = None
+        self.locations_processed = []
+        
+    def highlight_location(self, x, y, name):
+        """Show where the original click was supposed to be"""
+        locations_done = len(self.locations_processed)
+        total_locations = len(self.original_locations)
+        
+        print(f"\n{'='*60}")
+        print(f"📍 Location {locations_done + 1}/{total_locations}: '{name}'")
+        print(f"   Original: X={x}, Y={y}")
+        print(f"\n🎯 Click where '{name}' should be on YOUR screen")
+        print(f"   (or press middle mouse button to keep original)")
+        print(f"{'='*60}\n")
+        
+        # Move mouse to original location to show where it was
+        move_event = CGEventCreateMouseEvent(
+            None, kCGEventMouseMoved, (x, y), 0
+        )
+        CGEventPost(kCGHIDEventTap, move_event)
+        
+    def process_line(self, line):
+        """Process a single line from the script"""
+        line = line.strip()
+        
+        if not line or line.startswith('#'):
+            return True  # Skip empty lines and comments
+            
+        # Check if this line references a location
+        if 'click' in line.lower() or 'move' in line.lower():
+            # Extract location name
+            parts = line.split()
+            location_name = None
+            
+            # Look for location reference
+            for i, part in enumerate(parts):
+                if part in self.original_locations:
+                    location_name = part
+                    break
+            
+            if location_name and location_name not in self.locations_processed:
+                # Get original coordinates
+                orig_x = self.original_locations[location_name]['x']
+                orig_y = self.original_locations[location_name]['y']
+                
+                # Show the original location
+                self.highlight_location(orig_x, orig_y, location_name)
+                
+                # Wait for user to click new location
+                self.waiting_for_click = True
+                self.current_location_name = location_name
+                return False  # Don't advance yet
+        
+        return True  # Continue to next line
+    
+    def mouse_callback(self, proxy, event_type, event, refcon):
+        """Handle mouse events during remapping"""
+        if event_type == kCGEventLeftMouseDown and self.waiting_for_click:
+            # Get click location
+            location = CGEventGetLocation(event)
+            x, y = location.x, location.y
+            
+            # Save new location
+            self.new_locations[self.current_location_name] = {'x': int(x), 'y': int(y)}
+            self.locations_processed.append(self.current_location_name)
+            
+            print(f"✅ Updated '{self.current_location_name}' to X: {int(x)}, Y: {int(y)}")
+            
+            # Stop waiting
+            self.waiting_for_click = False
+            self.current_location_name = None
+            
+            # Continue processing
+            self.current_line += 1
+            self.continue_processing()
+            
+            return None  # Suppress the click
+            
+        elif event_type == kCGEventOtherMouseDown:
+            # Middle mouse button
+            button = CGEventGetIntegerValueField(event, kCGMouseEventButtonNumber)
+            if button == 2:  # Middle button
+                if self.waiting_for_click:
+                    # Keep original location
+                    orig_loc = self.original_locations[self.current_location_name]
+                    self.new_locations[self.current_location_name] = orig_loc
+                    self.locations_processed.append(self.current_location_name)
+                    
+                    print(f"↔️  Keeping original location for '{self.current_location_name}'")
+                    
+                    # Stop waiting
+                    self.waiting_for_click = False
+                    self.current_location_name = None
+                    
+                    # Continue processing
+                    self.current_line += 1
+                    self.continue_processing()
+                
+                return None  # Suppress the click
+        
+        return event  # Pass through other events
+    
+    def continue_processing(self):
+        """Continue processing script lines"""
+        while self.current_line < len(self.script_lines):
+            if not self.process_line(self.script_lines[self.current_line]):
+                # Waiting for user input
+                return
+            self.current_line += 1
+        
+        # Check if we got all locations
+        for name in self.original_locations:
+            if name not in self.locations_processed:
+                # Process any remaining locations
+                orig_x = self.original_locations[name]['x']
+                orig_y = self.original_locations[name]['y']
+                
+                self.highlight_location(orig_x, orig_y, name)
+                self.waiting_for_click = True
+                self.current_location_name = name
+                return
+        
+        # Finished processing
+        self.finish_remapping()
+    
+    def finish_remapping(self):
+        """Save the remapped locations and finish"""
+        # Add any locations that weren't remapped
+        for name, loc in self.original_locations.items():
+            if name not in self.new_locations:
+                self.new_locations[name] = loc
+        
+        # Save new locations file
+        locations_file = os.path.join(self.target_recording_path, 'locations.json')
+        with open(locations_file, 'w') as f:
+            json.dump(self.new_locations, f, indent=2)
+        
+        print(f"\n{'='*60}")
+        print(f"✅ Remapping complete!")
+        print(f"📁 New recording created: {self.target_recording_path}")
+        print(f"📍 Locations remapped: {len(self.new_locations)}")
+        print(f"\nTo play the remapped recording:")
+        print(f"  ./bin/play {self.target_recording_path}")
+        print(f"{'='*60}\n")
+        
+        CFRunLoopStop(CFRunLoopGetCurrent())
+    
+    def start(self):
+        """Start the remapping process"""
+        print(f"\n{'='*60}")
+        print(f"🔄 REMAPPER - Adapt recording for your machine")
+        print(f"{'='*60}")
+        print(f"📂 Source: {self.source_recording_path}")
+        print(f"📂 Target: {self.target_recording_path}")
+        print(f"📍 Locations to remap: {len(self.original_locations)}")
+        print(f"\nInstructions:")
+        print(f"  • For each location, click where it should be on YOUR screen")
+        print(f"  • Or press middle mouse button to keep the original location")
+        print(f"  • Press Ctrl+C to cancel at any time")
+        print(f"{'='*60}\n")
+        
+        # Set up mouse event tap
+        mask = (
+            CGEventMaskBit(kCGEventLeftMouseDown) |
+            CGEventMaskBit(kCGEventOtherMouseDown)
+        )
+        
+        tap = CGEventTapCreate(
+            kCGSessionEventTap,
+            kCGHeadInsertEventTap,
+            0,
+            mask,
+            self.mouse_callback,
+            None
+        )
+        
+        if not tap:
+            print("❌ Failed to create event tap. Make sure you have accessibility permissions.")
+            print("Go to System Preferences > Security & Privacy > Privacy > Accessibility")
+            import sys
+            sys.exit(1)
+        
+        # Add to run loop
+        source = CFMachPortCreateRunLoopSource(None, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopDefaultMode)
+        
+        # Start processing in a separate thread
+        processing_thread = threading.Thread(target=self.continue_processing)
+        processing_thread.daemon = True
+        processing_thread.start()
+        
+        # Run the event loop
+        try:
+            CFRunLoopRun()
+        except KeyboardInterrupt:
+            print("\n\n⚠️  Remapping cancelled by user")
+            import sys
+            sys.exit(0)
+
 def wait_for_middle_click():
     """Wait for middle mouse click to start execution"""
     from Quartz import (
@@ -676,8 +923,57 @@ def main():
                        help='Delay between commands in seconds (default: 0.1)')
     parser.add_argument('--countdown', action='store_true',
                        help='Use countdown instead of middle click trigger')
+    parser.add_argument('--remap', action='store_true',
+                       help='Remap recording locations for your machine')
+    parser.add_argument('--remap-to', 
+                       help='Target directory for remapped recording (default: <source>_remapped)')
     
     args = parser.parse_args()
+    
+    # Handle remapping mode
+    if args.remap and args.script:
+        # Determine source recording path
+        if os.path.exists(f"recordings/{args.script}/script.txt"):
+            source_recording = f"recordings/{args.script}"
+        elif os.path.exists(args.script) and os.path.isdir(args.script):
+            source_recording = args.script
+        else:
+            print(f"❌ Recording '{args.script}' not found")
+            import sys
+            sys.exit(1)
+        
+        # Determine target recording path
+        if args.remap_to:
+            target_recording = args.remap_to
+        else:
+            # Auto-generate name
+            base_name = os.path.basename(source_recording)
+            target_recording = f"recordings/{base_name}_remapped"
+        
+        # Check if source has required files
+        if not os.path.exists(os.path.join(source_recording, 'script.txt')):
+            print(f"❌ Script file not found in {source_recording}")
+            import sys
+            sys.exit(1)
+        
+        if not os.path.exists(os.path.join(source_recording, 'locations.json')):
+            print(f"❌ Locations file not found in {source_recording}")
+            import sys
+            sys.exit(1)
+        
+        # Check if target already exists
+        if os.path.exists(target_recording):
+            response = input(f"⚠️  Target {target_recording} already exists. Overwrite? (y/n): ")
+            if response.lower() != 'y':
+                print("Cancelled.")
+                import sys
+                sys.exit(0)
+            shutil.rmtree(target_recording)
+        
+        # Create and start remapper
+        remapper = Remapper(source_recording, target_recording)
+        remapper.start()
+        return
     
     if args.script:
         # Check if it's a recording ID or a file path

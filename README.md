@@ -9,7 +9,8 @@ A collection of tools for mouse and keyboard automation on macOS, including loca
 ├── bin/                    # Executable wrapper scripts
 │   ├── play               # Quick access to script execution
 │   ├── record             # Record automation sessions
-│   └── playback           # Playback recorded sessions
+│   ├── playback           # Playback recorded sessions
+│   └── remap              # Remap recordings for different machines
 ├── src/
 │   ├── core/              # Main functionality
 │   │   ├── simon_says.py  # Execute human-readable automation scripts
@@ -74,6 +75,18 @@ source /Users/rs/mouse/.venv/bin/activate
 
    Press middle mouse button to start execution.
 
+4. **Remap recordings for different machines:**
+
+   ```bash
+   # Remap a recording to adapt locations for your screen
+   ./bin/remap rec1
+   
+   # Or specify a custom target directory
+   ./bin/remap rec1 --remap-to my_custom_recording
+   ```
+
+   The remapper will guide you through clicking each location to update it for your machine.
+
 ## Features
 
 ### Session Recording (`src/core/script_recorder.py`)
@@ -88,6 +101,13 @@ source /Users/rs/mouse/.venv/bin/activate
 - Clipboard-based text pasting (reliable for code editors)
 - Middle mouse button trigger for precise timing
 - Automatic trailing whitespace cleanup
+
+### Recording Remapper (`bin/remap`)
+
+- Adapt recordings from one machine to another
+- Interactive location remapping interface
+- Preserves script logic while updating screen coordinates
+- Creates new recording with updated locations
 
 ### Commands Supported
 
